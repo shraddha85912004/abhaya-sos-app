@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "824241641511",
+    "project_id": "meow-hunter-4c243",
+    "storage_bucket": "meow-hunter-4c243.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:824241641511:android:768f8054fe0bb140ad1602",
+        "android_client_info": {
+          "package_name": "com.meow.sosapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA9bx0Iq9GJoIREyKoLLK7UY7bUUylQoZw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:background="#F9F9F9">
+
+    <!-- Title -->
+    <TextView
+        android:id="@+id/tv_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Select Contacts"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:textColor="#000"
+        android:layout_marginBottom="16dp" />
+
+    <!-- Button to select contacts -->
+    <Button
+        android:id="@+id/btn_select_contact"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Select Contact"
+        android:backgroundTint="#4CAF50"
+        android:textColor="#FFF"
+        android:layout_marginBottom="16dp" />
+
+    <!-- ListView to display selected contacts -->
+    <ListView
+        android:id="@+id/selected_contacts_list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:divider="@android:color/darker_gray"
+        android:dividerHeight="1dp"
+        android:background="#FFFFFF"
+        android:padding="8dp" />
+
+    <!-- Button to send SOS message -->
+    <Button
+        android:id="@+id/btn_send_sos"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Send SOS Message"
+        android:backgroundTint="#F44336"
+        android:textColor="#FFF" />
+
+</LinearLayout>

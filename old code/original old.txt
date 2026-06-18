@@ -1,0 +1,531 @@
+package com.meow.sosapp;
+
+import static androidx.fragment.app.FragmentManager.TAG;
+import static com.meow.sosapp.MainActivity.SOS_DETECTED_ACTION;
+
+import android.Manifest;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.Service;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.pm.PackageManager;
+import android.location.Location;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.IBinder;
+import android.os.Looper;
+import android.speech.RecognitionListener;
+import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
+import android.telephony.SmsManager;
+import android.util.Log;
+import android.widget.Toast;
+
+import androidx.annotation.NonNull;
+import androidx.core.app.ActivityCompat;
+import androidx.core.app.NotificationCompat;
+import androidx.core.content.ContextCompat;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
+import androidx.work.Data;
+import androidx.work.OneTimeWorkRequest;
+import androidx.work.WorkManager;
+
+import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationCallback;
+import com.google.android.gms.location.LocationRequest;
+import com.google.android.gms.location.LocationResult;
+import com.google.android.gms.location.LocationServices;
+import com.google.android.gms.tasks.OnSuccessListener;
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
+
+import java.util.ArrayList;
+import java.util.logging.Handler;
+
+public class SpeechRecognitionService extends Service {
+
+    /*
+    private String JSON_STR = "";
+    private String EMPTY_JSON_STR = "";
+    private boolean isRunning = false;
+    private Handler handler;
+
+    */
+
+
+
+    // Constants
+    public static final String CMD_RECEIVED_ACTION = "com.meow.sosapp.CMD_RECEIVED";
+    public static final String SEND_ACTION = "com.meow.sosapp.SEND";
+    public static final String STOP_LISTENING_ACTION = "com.meow.sosapp.STOP_LISTENING";
+    private static final String CHANNEL_ID = "SMSServiceChannel";
+    private static final int NOTIFICATION_ID = 1;
+    private static final String TAG = "SpeechRecogService"; // Added TAG for logging
+
+
+
+
+    // Speech Recognition
+    private SpeechRecognizer speechRecognizer;
+    private Intent speechRecognizerIntent;
+    private String wakeword = "help"; // Customizable wakeword
+    private boolean isListening = false;
+    private volatile boolean shouldContinueListening = false; // *** ADDED: Flag to control listening loop ***
+
+
+
+
+    // Contacts & SMS
+    private Gson gson = new Gson();
+    private String FILE_PATH = FileUtil.getExternalStorageDir().concat("/EMERGENCY/CONTACTS.txt"); // Ensure FileUtil is correctly implemented
+    private ArrayList<String> number_list_str = new ArrayList<>();
+
+
+    // Location
+    private FusedLocationProviderClient fusedLocationClient;
+    private BroadcastReceiver cmdReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
+            if (action == null) return;
+
+            switch (action) {
+                case CMD_RECEIVED_ACTION:
+                    Log.d("SpeechRecognitionService.java", "Received CMD_RECEIVED_ACTION. Trying startListening()");
+                    startListening();
+                    break;
+                case STOP_LISTENING_ACTION:
+                    Log.d("SpeechRecognitionService.java", "Received STOP_LISTENING_ACTION. Trying stopSpeechRecognition()");
+                    stopSpeechRecognition();
+                    break;
+                case SEND_ACTION:
+                    Log.d("SpeechRecognitionService.java", "Received SEND_ACTION. Trying send()");
+                    send();
+                    break;
+            }
+        }
+    };
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        // Create notification channel for Android 1O and above or ig lower suppoerted too idk ill check later about this
+        createNotificationChannel();
+        
+
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
+IntentFilter filter = new IntentFilter();
+        filter.addAction(CMD_RECEIVED_ACTION);
+        filter.addAction(STOP_LISTENING_ACTION);
+        filter.addAction(SEND_ACTION);
+        LocalBroadcastManager.getInstance(this).registerReceiver(cmdReceiver, filter);
+
+        initializeSpeechRecognizer();
+}
+    private void initializeSpeechRecognizer() {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            Log.e(TAG, "Speech recognition not available on this device.");
+            // Handle this case appropriately, maybe stop the service or notify the user
+            stopSelf(); // Stop the service if speech recognition is not available
+            return;
+        }
+
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
+        speechRecognizer.setRecognitionListener(new RecognitionListener() {
+            @Override
+            public void onReadyForSpeech(Bundle params) {
+                Log.d(TAG, "Ready for speech.");
+                isListening = true;
+            }
+
+            @Override
+            public void onBeginningOfSpeech() {
+                Log.d(TAG, "Speech started.");
+            }
+
+            @Override
+            public void onRmsChanged(float rmsdB) {}
+
+            @Override
+            public void onBufferReceived(byte[] buffer) {}
+
+            @Override
+            public void onEndOfSpeech() {
+                Log.d(TAG, "Speech ended.");
+                //isListening = false;
+                // *** MODIFIED: Only restart if shouldContinueListening is true ***
+                if (shouldContinueListening) {
+                    startListeningInternal(); // Use internal method to avoid redundant checks
+                } else {
+                    Log.d(TAG, "Not restarting listening as shouldContinueListening is false.");
+                }
+            }
+ @Override
+            public void onError(int error) {
+                Log.e(TAG, "SpeechRecognizer Error: " + getErrorText(error) + error);
+                isListening = false;
+
+                // REPLACE existing restart logic with:
+                if (shouldContinueListening && error == SpeechRecognizer.ERROR_CLIENT) {
+
+                    safeRestartListening(); // Use new safe method
+                } else if (shouldContinueListening) {
+
+                    startListening(); // Original behavior for non-client errors
+                }
+            }
+
+
+
+            @Override
+            public void onResults(Bundle results) {
+                isListening = false; // Set listening to false as we got results
+                ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                if (matches != null && !matches.isEmpty()) {
+                    String spokenText = matches.get(0).toLowerCase();
+                    Log.d(TAG, "Spoken Text: " + spokenText);
+                    if (spokenText.contains(wakeword)) {
+                        Log.i(TAG, "Wakeword '" + wakeword + "' detected!");
+                        send(); // Call the method to send the SOS message
+                    }
+                }
+                // *** MODIFIED: Only restart if shouldContinueListening is true ***
+                if (shouldContinueListening) {
+                    Log.d(TAG, "Restarting listening after results.");
+                    startListeningInternal(); // Use internal method
+                } else {
+                    Log.d(TAG, "Not restarting listening after results as shouldContinueListening is false.");
+                }
+            }
+
+            @Override
+            public void onPartialResults(Bundle partialResults) {}
+
+            @Override
+            public void onEvent(int eventType, Bundle params) {}
+        });
+
+        // Prepare the intent for speech recognition
+        speechRecognizerIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        speechRecognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        speechRecognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US"); // Consider making language configurable
+        speechRecognizerIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false); // We usually don't need partial results for wakeword
+        // speechRecognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1); // Only need the top result
+    }
+
+    // Add this at the end of your SpeechRecognitionService class
+    private void safeRestartListening() {
+        // 1. Cancel any pending operations
+        if (speechRecognizer != null) {
+            speechRecognizer.cancel();
+        }
+        // 2. Reset state flags
+        isListening = false;
+
+        // 3. Delay before restart (essential for ERROR_CLIENT recovery)
+        new android.os.Handler(Looper.getMainLooper()).postDelayed(() -> {
+            if (shouldContinueListening && !isListening) {
+                Log.d(TAG, "Safe restart attempt");
+                initializeSpeechRecognizer(); // Recreate instance
+                startListeningInternal();
+            }
+        }, 1000); // 1-second delay
+    }
+
+        /////////////////////////////////////////////////////  On Start this Service ///////////////////////////////////////////////
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        Log.d(TAG, "onStartCommand");
+        Notification notification = createNotification();
+        int foregroundServiceTypeFlags = 0;
+
+        // Define foreground service types for Android U+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            foregroundServiceTypeFlags |= android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
+            foregroundServiceTypeFlags |= android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION;
+            // foregroundServiceTypeFlags |= android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE; // Only if absolutely necessary and declared in Manifest
+            startForeground(NOTIFICATION_ID, notification, foregroundServiceTypeFlags);
+        } else {
+            startForeground(NOTIFICATION_ID, notification);
+        }
+
+        // Don't automatically start listening here. Wait for CMD_RECEIVED_ACTION.
+        // startListening();
+
+        return START_STICKY; // Keep the service running
+    }
+
+    //////////////// Send Sms Logic will parse all saved numbers then it will pass the numbers to sendLocationSms()  //////////////
+    // Public method to start listening (e.g., called via Broadcast)
+    private void startListening() {
+        Log.d(TAG, "startListening called");
+        shouldContinueListening = true; // Set the flag to allow continuous listening
+        startListeningInternal();
+    }
+
+    // Internal method to handle the actual start listening logic
+    private void startListeningInternal() {
+if (speechRecognizer != null && !isListening) {
+            try {
+                // ADD this cleanup before starting:
+                speechRecognizer.cancel();
+                speechRecognizer.destroy();
+            } catch (Exception e) {
+                Log.e(TAG, "Cleanup error: " + e.getMessage());
+            }
+
+            // Keep your existing start logic:
+            initializeSpeechRecognizer(); // Recreate instance
+            Log.d(TAG, "Starting SpeechRecognizer listening...");
+            try {
+                speechRecognizer.startListening(speechRecognizerIntent);
+            } catch (Exception e) {
+                Log.e(TAG, "Error starting listening: " + e.getMessage());
+                safeRestartListening(); // Add recovery
+            }
+        } else if (speechRecognizer == null) {
+            Log.w(TAG, "SpeechRecognizer not initialized. Cannot start listening.");
+            initializeSpeechRecognizer(); // Try to re-initialize
+        } else {
+            Log.d(TAG, "Already listening or starting, skipping redundant start call.");
+        }
+
+    }
+
+    // Method to stop listening
+    private void stopSpeechRecognition() {
+        Log.d(TAG, "stopSpeechRecognition called");
+        shouldContinueListening = false; // *** ADDED: Prevent restarting ***
+        if (speechRecognizer != null) {
+            Log.d(TAG, "Stopping/Canceling SpeechRecognizer listening...");
+            // Use cancel() for immediate stop, stopListening() waits for speech end
+            speechRecognizer.cancel();
+            isListening = false; // Manually set flag as onEndOfSpeech might not be called after cancel
+        }
+    }
+    // Send SMS Logic
+    private void send() {
+        Log.d(TAG, "send() called");
+        try {
+            String jsonContent = FileUtil.readFile(FILE_PATH); // Ensure FileUtil handles errors
+            if (jsonContent == null || jsonContent.isEmpty()) {
+                Log.e(TAG, "Contact file is empty or could not be read.");
+                Toast.makeText(this, "No contacts found to send SOS.", Toast.LENGTH_LONG).show();
+                return;
+            }
+            number_list_str = gson.fromJson(jsonContent, new TypeToken<ArrayList<String>>(){}.getType());
+
+            if (number_list_str == null || number_list_str.isEmpty()) {
+                Log.e(TAG, "Parsed contact list is null or empty.");
+                Toast.makeText(this, "No valid contacts parsed.", Toast.LENGTH_LONG).show();
+                return;
+            }
+
+            Log.d(TAG, "Found " + number_list_str.size() + " contacts.");
+            for (String num : number_list_str) {
+                if (num != null && !num.trim().isEmpty()) { // Basic validation
+                    Log.d(TAG, "Requesting location to send SMS to " + num);
+                    sendLocationSms(num.trim());
+                } else {
+                    Log.w(TAG, "Skipping invalid number entry.");
+                }
+            }
+            // Notify MainActivity or UI that SOS was triggered
+            Intent sosIntent = new Intent(MainActivity.SOS_DETECTED_ACTION);
+            LocalBroadcastManager.getInstance(this).sendBroadcast(sosIntent);
+
+        } catch (Exception e) { // Catch potential JSON parsing errors or file reading errors
+            Log.e(TAG, "Error reading/parsing contacts file or sending SMS: " + e.getMessage(), e);
+            Toast.makeText(this, "Error processing SOS: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+// Notification Channel Creation
+    private void createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel serviceChannel = new NotificationChannel(
+                    CHANNEL_ID,
+                    "SOS Service Channel",
+                    NotificationManager.IMPORTANCE_LOW // Use LOW to be less intrusive if possible
+            );
+            serviceChannel.setDescription("Channel for SOS background service");
+            NotificationManager manager = getSystemService(NotificationManager.class);
+            if (manager != null) {
+                manager.createNotificationChannel(serviceChannel);
+                Log.d(TAG, "Notification channel created.");
+            } else {
+                Log.e(TAG, "NotificationManager not available.");
+            }
+        }
+    }
+    // Notification Creation
+    private Notification createNotification() {
+        // Add intent to open MainActivity when notification is clicked (optional)
+        // Intent notificationIntent = new Intent(this, MainActivity.class);
+        // PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE);
+
+        return new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("SOS Service Active")
+                .setContentText("Listening for wakeword '" + wakeword + "'")
+                .setSmallIcon(R.drawable.ic_launcher_foreground) // Use foreground icon
+                .setPriority(NotificationCompat.PRIORITY_LOW) // Match channel importance
+                // .setContentIntent(pendingIntent) // Uncomment to make notification clickable
+                .setOngoing(true) // Make it non-dismissable while service is running
+                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+                .build();
+    }
+
+// Location and SMS Sending Methods (Keep existing logic, added logging and checks)
+    private void sendLocationSms(String phoneNumber) {
+        Log.d(TAG, "Attempting to send location SMS to: " + phoneNumber);
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+                ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) { // Check both permissions
+            Log.e(TAG, "Location permission not granted.");
+            Toast.makeText(this, "Location permission not granted", Toast.LENGTH_SHORT).show();
+            // Maybe notify the user more prominently or stop the service if location is critical
+            return;
+        }
+
+        // Try getting last known location first
+        fusedLocationClient.getLastLocation().addOnSuccessListener(ContextCompat.getMainExecutor(this), new OnSuccessListener<Location>() {
+            @Override
+            public void onSuccess(Location location) {
+                if (location != null) {
+                    double latitude = location.getLatitude();
+                    double longitude = location.getLongitude();
+                    // Use HTTPS for Google Maps links
+                    String locationMessage = "Help I am in Danger.... My current location: https://www.google.com/maps?q=" + latitude + "," + longitude;
+                    Log.d(TAG, "Sending last known location to " + phoneNumber);
+                    sendSOSMessage(phoneNumber, locationMessage);
+                    // Optionally request a fresh update as well, but maybe not immediately after sending last known.
+                    // requestLocationUpdates(phoneNumber); // Decide if you need this redundancy
+                } else {
+                    Log.w(TAG, "Last known location is null. Requesting fresh location update.");
+                    // Request location updates if last location is null
+                    requestLocationUpdates(phoneNumber);
+                }
+            }
+        }).addOnFailureListener(e -> {
+            Log.e(TAG, "Error getting last known location: " + e.getMessage(), e);
+            // Fallback to requesting updates if getLastLocation fails
+            requestLocationUpdates(phoneNumber);
+        });
+    }
+private void requestLocationUpdates(String phoneNumber) {
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+                ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            Log.e(TAG, "Location permission not granted for updates.");
+            Toast.makeText(this, "Location permission not granted", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // Configure Location Request
+        LocationRequest locationRequest = new LocationRequest.Builder(LocationRequest.PRIORITY_HIGH_ACCURACY, 10000) // intervalMillis
+                .setMinUpdateIntervalMillis(5000) // fastestIntervalMillis
+                .setMaxUpdates(1) // Get just one update
+                .build();
+
+        Log.d(TAG, "Requesting single location update for " + phoneNumber);
+        fusedLocationClient.requestLocationUpdates(locationRequest, new LocationCallback() {
+            @Override
+            public void onLocationResult(@NonNull LocationResult locationResult) {
+                // No need to remove updates manually with setMaxUpdates(1)
+                // fusedLocationClient.removeLocationUpdates(this); // Not needed
+
+                Location location = locationResult.getLastLocation(); // Should contain the single update
+                if (location != null) {
+                    double latitude = location.getLatitude();
+                    double longitude = location.getLongitude();
+                    // Use HTTPS for Google Maps links
+                    String locationMessage = "Help I am in Danger.... My updated location: https://www.google.com/maps?q=" + latitude + "," + longitude;
+                    Log.d(TAG, "Sending updated location to " + phoneNumber);
+                    sendSOSMessage(phoneNumber, locationMessage);
+                } else {
+                    Log.e(TAG, "Location update received but location was null.");
+                    // Optionally send a message indicating location couldn't be determined
+                    sendSOSMessage(phoneNumber, "Help I am in Danger.... Unable to determine exact location.");
+                }
+            }
+
+            @Override
+            public void onLocationAvailability(@NonNull com.google.android.gms.location.LocationAvailability locationAvailability) {
+                super.onLocationAvailability(locationAvailability);
+                if (!locationAvailability.isLocationAvailable()) {
+                    Log.e(TAG, "Location is not available on the device.");
+                    // Handle case where location services are off
+                    sendSOSMessage(phoneNumber, "Help I am in Danger.... Location services might be off.");
+                    // Stop trying to get location for this number if it's unavailable
+                    fusedLocationClient.removeLocationUpdates(this);
+                }
+            }
+        },// ContextCompat.getMainLooper(this)); // Request updates on the main looper
+        Looper.getMainLooper()); // Use Looper.getMainLooper()
+    }
+
+
+    private void sendSOSMessage(String phoneNumber, String message) {
+        // Check SMS permission before sending
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
+            Log.e(TAG, "SEND_SMS permission not granted.");
+            Toast.makeText(this, "SMS permission not granted.", Toast.LENGTH_SHORT).show();
+            return; // Don't attempt to send without permission
+        }
+
+        try {
+            SmsManager smsManager = SmsManager.getDefault();
+            // For long messages, divide them
+            ArrayList<String> parts = smsManager.divideMessage(message);
+            smsManager.sendMultipartTextMessage(phoneNumber, null, parts, null, null);
+            Log.i(TAG, "SMS sent successfully to " + phoneNumber);
+            // Toast.makeText(getApplicationContext(), "SOS Sent to " + phoneNumber, Toast.LENGTH_SHORT).show(); // Maybe too many toasts
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to send SMS to " + phoneNumber + ": " + e.getMessage(), e);
+            Toast.makeText(SpeechRecognitionService.this, "Failed to send SMS to " + phoneNumber, Toast.LENGTH_LONG).show();
+        }
+    }
+
+
+    // Helper to get error text
+    private String getErrorText(int errorCode) {
+        String message;
+        switch (errorCode) {
+            case SpeechRecognizer.ERROR_AUDIO: message = "Audio recording error"; break;
+            case SpeechRecognizer.ERROR_CLIENT: message = "Client side error"; break;
+            case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS: message = "Insufficient permissions"; break;
+            case SpeechRecognizer.ERROR_NETWORK: message = "Network error"; break;
+            case SpeechRecognizer.ERROR_NETWORK_TIMEOUT: message = "Network timeout"; break;
+            case SpeechRecognizer.ERROR_NO_MATCH: message = "No match"; break; // This is common, might not need restart always
+            case SpeechRecognizer.ERROR_RECOGNIZER_BUSY: message = "RecognitionService busy"; break;
+            case SpeechRecognizer.ERROR_SERVER: message = "Error from server"; break;
+            case SpeechRecognizer.ERROR_SPEECH_TIMEOUT: message = "No speech input"; break; // Also common
+            default: message = "Didn't understand, please try again."; break;
+        }
+        return message;
+    }
+
+@Override
+    public void onDestroy() {
+        super.onDestroy();
+        Log.d(TAG, "onDestroy");
+        stopSpeechRecognition(); // Ensure listening stops
+        if (speechRecognizer != null) {
+            speechRecognizer.destroy(); // Release resources
+            speechRecognizer = null;
+            Log.d(TAG, "SpeechRecognizer destroyed.");
+        }
+        LocalBroadcastManager.getInstance(this).unregisterReceiver(cmdReceiver);
+        // Stop location updates if any are active (though should be stopped by single update callback)
+        if (fusedLocationClient != null) {
+            // fusedLocationClient.removeLocationUpdates(locationCallback); // Need to store the callback instance if using continuous updates
+        }
+        Log.d(TAG, "Service destroyed.");
+    }
+
+    @Override
+    public IBinder onBind(Intent intent) {
+        return null; // Not a bound service
+    }
+}

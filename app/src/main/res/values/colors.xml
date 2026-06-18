@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    
+    <!-- Space Theme Colors -->
+    <color name="colorPrimary">#00E5FF</color>
+    <color name="colorPrimaryDark">#00B8D4</color>
+    <color name="colorAccent">#E91E63</color>
+    
+    <color name="background_dark">#060814</color>
+    <color name="background_darker">#020308</color>
+    
+    <!-- Glassmorphism Cards (Semi-transparent) -->
+    <color name="card_background">#1AFFFFFF</color>
+    <color name="card_background_light">#2AFFFFFF</color>
+    <color name="card_stroke">#4DFFFFFF</color>
+    
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#B3E5FC</color>
+    <color name="text_hint">#4FC3F7</color>
+    
+    <!-- Status Colors -->
+    <color name="color_police">#29B6F6</color>
+    <color name="color_hospital">#EF5350</color>
+    <color name="color_fire">#FF9800</color>
+    <color name="color_success">#00E676</color>
+    
+    <!-- Deep Space Gradients -->
+    <color name="gradient_start">#0A0E29</color>
+    <color name="gradient_end">#03040C</color>
+    
+    <!-- Legacy Control Colors -->
+    <color name="colorControlHighlight">#4D00E5FF</color>
+    <color name="colorControlNormal">#4FC3F7</color>
+</resources>

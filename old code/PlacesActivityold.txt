@@ -1,0 +1,189 @@
+package com.meow.sosapp;
+import android.Manifest;
+import android.content.pm.PackageManager;
+import android.location.Location;
+import android.os.Bundle;
+import android.util.Log;
+import android.widget.ListView;
+import android.widget.Toast;
+import androidx.core.content.ContextCompat;
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+
+import com.android.volley.Request;
+import com.android.volley.RequestQueue;
+import com.android.volley.Response;
+import com.android.volley.VolleyError;
+import com.android.volley.toolbox.JsonObjectRequest;
+import com.android.volley.toolbox.Volley;
+import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationServices;
+import com.google.android.gms.tasks.OnCompleteListener;
+import com.google.android.gms.tasks.Task;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+
+public class PlacesActivity extends AppCompatActivity {
+    private static final int LOCATION_PERMISSION_REQUEST_CODE = 100;
+    private FusedLocationProviderClient fusedLocationClient;
+    private ListView storeListView;
+    private StoreAdapter storeAdapter;
+    private List<Store> stores = new ArrayList<>();
+    private RequestQueue requestQueue;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_places);
+
+        storeListView = findViewById(R.id.store_list);
+        storeAdapter = new StoreAdapter(this, stores);
+        storeListView.setAdapter(storeAdapter);
+
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
+        requestQueue = Volley.newRequestQueue(this);
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+                != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.ACCESS_FINE_LOCATION},
+                    LOCATION_PERMISSION_REQUEST_CODE);
+        } else {
+            getLastLocation();
+
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == LOCATION_PERMISSION_REQUEST_CODE) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                getLastLocation();
+            } else {
+                Toast.makeText(this, "Location permission denied", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+    private void getLastLocation() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            // Handle permission denied case (e.g., show a message or disable location-based features)
+            Log.d("PlacesActivity","permission Denied");
+            return;
+        }
+        Log.d("PlacesActivity","getting triggered getLastLocation()");
+
+        fusedLocationClient.getLastLocation()
+                .addOnCompleteListener(new OnCompleteListener<Location>() {
+                    @Override
+                    public void onComplete(@NonNull Task<Location> task) {
+                        if (task.isSuccessful() && task.getResult() != null) {
+                            Location location = task.getResult();
+                            double latitude = location.getLatitude();
+                            double longitude = location.getLongitude();
+
+                            fetchNearbyStores(latitude, longitude);
+                        } else {
+                            Toast.makeText(PlacesActivity.this, "Failed to get location", Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                });
+    }
+
+
+    private void fetchNearbyStores(double latitude, double longitude) {
+        Log.d("PlacesActivity","fetching triggered fetchNearbyStores()");
+        String url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json?" +
+                "key=" +"AIzaSyCP0x0SpmKKOcqh15g6NM8HctgsItqEFHM"+ // Replace with your actual API key
+                "&location=" + latitude + "," + longitude +
+                "&radius=15000" + // Adjust radius as needed
+                "&keyword=police station";
+
+        JsonObjectRequest request = new JsonObjectRequest(Request.Method.GET, url, null,
+                new Response.Listener<JSONObject>() {
+                    @Override
+                    public void onResponse(JSONObject response) {
+                        /*try {
+                            // Rename the inner 'results' variable
+                            JSONArray responseResults = response.getJSONArray("results");
+                            for (int i = 0; i < responseResults.length(); i++) {
+                                JSONObject result = responseResults.getJSONObject(i);
+                                // ... (rest of the code remains the same)
+
+                                String name = result.getString("name");
+                                String address = result.getString("vicinity");
+                                //String phoneNumber = result.getString("phone_number");
+                                JSONObject geometry = result.getJSONObject("geometry");
+                                JSONObject location = geometry.getJSONObject("location");
+                                double storeLatitude = location.getDouble("lat");
+                                double storeLongitude = location.getDouble("lng");
+
+                                float[] results = new float[1];
+                                Location.distanceBetween(latitude, longitude, storeLatitude, storeLongitude, results);
+                                float distanceInMeters = results[0];
+
+                                Store store = new Store(name, address, phoneNumber, distanceInMeters);
+                                stores.add(store);
+                            }
+
+                            // ... (rest of the code remains the same)
+                            Collections.sort(stores, new Comparator<Store>() {
+                                @Override
+                                public int compare(Store store1, Store store2) {
+                                    return Double.compare(store1.getDistance(), store2.getDistance());
+                                }
+                            });
+                        } catch (JSONException e) {
+                            e.printStackTrace();
+                            Toast.makeText(PlacesActivity.this, "Error parsing JSON: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                        }
+                        */
+                        try { JSONArray responseResults = response.getJSONArray("results");
+                            for (int i = 0; i < responseResults.length(); i++) {
+                                JSONObject result = responseResults.getJSONObject(i);
+                                String name = result.getString("name");
+                                String address = result.getString("vicinity");
+                                JSONObject geometry = result.getJSONObject("geometry");
+                                JSONObject location = geometry.getJSONObject("location");
+                                double storeLatitude = location.getDouble("lat");
+                                double storeLongitude = location.getDouble("lng");
+                                float[] results = new float[1];
+                                Location.distanceBetween(latitude, longitude, storeLatitude, storeLongitude, results);
+                                float distanceInMeters = results[0]; Store store = new Store(name, address, distanceInMeters);
+                                stores.add(store);
+                            // Log the store details for debugging
+                            Log.d("StoreDetails", "Name: " + name + ", Address: " + address + ", Distance: " + distanceInMeters); }
+                            // Sort the stores list
+                            Collections.sort(stores, new Comparator<Store>() {
+                                @Override public int compare(Store store1, Store store2) {
+                                    return Double.compare(store1.getDistance(), store2.getDistance());
+                                }
+                            });
+                            // Notify the adapter that the data set has changed
+                            storeAdapter.notifyDataSetChanged();
+                        } catch (JSONException e) { e.printStackTrace(); Toast.makeText(PlacesActivity.this, "Error parsing JSON: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                        }
+
+
+                    }
+                }, new Response.ErrorListener() {
+            @Override
+            public void onErrorResponse(VolleyError error) {
+                Toast.makeText(PlacesActivity.this, "Error fetching data", Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        requestQueue.add(request);
+    }
+}
+
